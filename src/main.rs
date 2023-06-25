@@ -1,6 +1,9 @@
 use std::fs;
 use std::io::Read;
+use std::io;
+use std::io::Write;
 use std::process;
+use termios::*;
 
 pub const MAX_SIZE: usize = (1 << 16) + 1;
 
@@ -82,10 +85,10 @@ impl Memory {
         let mut buffer = [0; 1];
         std::io::stdin().read_exact(&mut buffer).unwrap();
         if buffer[0] != 0 {
-            self.write(MemoryMappedRegisters::Kbsr as u16, 1 << 15 as u16);
+            self.write(MemoryMappedRegisters::Kbsr as u16, 1 << 15);
             self.write(MemoryMappedRegisters::Kbdr as u16, buffer[0] as u16);
         } else {
-            self.write(MemoryMappedRegisters::Kbdr as u16, 0);
+            self.write(MemoryMappedRegisters::Kbsr as u16, 0);
         }
     }
 
@@ -161,9 +164,9 @@ impl Registers {
     }
 
     pub fn update_flag(&mut self, value: u16) {
-        if value == 0 {
+        if self.get_reg_value(value) == 0 {
             self.cond = Flag::Zero as u16
-        } else if value >> 15 != 0 {
+        } else if self.get_reg_value(value) >> 15 != 0 {
             self.cond = Flag::Neg as u16
         } else {
             self.cond = Flag::Pos as u16
@@ -172,56 +175,60 @@ impl Registers {
 }
 
 pub fn trap(trap_instr: u16, registers: &mut Registers, memory: &mut Memory) {
-    registers.update_register(registers.r7, registers.pc);
     match trap_instr & 0xFF {
         //TrapCode::Getc
         0x20 => {
-            let c = std::io::stdin()
-                .bytes()
-                .next()
-                .and_then(|result| result.ok())
-                .map(|byte| byte as u16);
-            registers.update_register(registers.r0, c.unwrap());
+            println!("Getc");
+            let mut buffer = [0; 1];
+            std::io::stdin().read_exact(&mut buffer).unwrap();
+            registers.r0 = buffer[0] as u16;
         }
         //TrapCode::Out
         0x21 => {
+            println!("OUt");
             let value = memory.read(registers.r0);
             print!("{}", (value as u8) as char);
         }
         //TrapCode::Puts
         0x22 => {
+            // Puts
             let mut index = registers.r0;
-            let mut value = memory.read(index);
-            while value != 0x0000 {
-                print!("{}", (value as u8) as char);
+            let mut c = memory.read(index);
+            while c != 0x0000 {
+                print!("{}", (c as u8) as char);
                 index += 1;
-                value = memory.read(index);
+                c = memory.read(index);
             }
+            io::stdout().flush().expect("failed to flush");
         }
         //TrapCode::In
         0x23 => {
-            print!("> ");
-            let c = std::io::stdin()
+            print!("Enter a  character : ");
+            io::stdout().flush().expect("failed to flush");
+            let char = std::io::stdin()
                 .bytes()
                 .next()
                 .and_then(|result| result.ok())
-                .map(|byte| byte as u16);
-            registers.r0 = c.unwrap();
+                .map(|byte| byte as u16)
+                .unwrap();
+            registers.r0 = char;
         }
         //TrapCode::Putsp
         0x24 => {
+            println!("Putsp");
             let mut index = registers.r0;
-            let mut value = memory.read(index);
-            while value != 0x0000 {
-                let c1 = value & 0xFF;
+            let mut c = memory.read(index);
+            while c != 0x0000 {
+                let c1 = ((c & 0xFF) as u8) as char;
                 print!("{}", c1);
-                let c2 = value >> 8;
-                if c2 != 0 {
+                let c2 = ((c >> 8) as u8) as char;
+                if c2 != '\0' {
                     print!("{}", c2);
                 }
                 index += 1;
-                value = memory.read(index);
+                c = memory.read(index);
             }
+            io::stdout().flush().expect("failed to flush");
         }
         //TrapCode::Halt
         0x25 => {
@@ -253,17 +260,16 @@ pub fn store_r(instr: u16, registers: &mut Registers, memory: &mut Memory) {
 pub fn store_i(instr: u16, registers: &mut Registers, memory: &mut Memory) {
     let r0: u16 = (instr >> 9) & 0x7;
     let pc_offset: u16 = sign_extend(instr & 0x1FF, 9);
-    let pc_value = registers.pc;
     let value = pc_offset as u32 + registers.pc as u32;
     let value = memory.read(value as u16);
-    memory.write(value, registers.get_reg_value(r0));
+    memory.write(value as u16, registers.get_reg_value(r0) as u16);
 }
 
 pub fn store(instr: u16, registers: &mut Registers, memory: &mut Memory) {
     let r0: u16 = (instr >> 9) & 0x7;
     let pc_offset: u16 = sign_extend(instr & 0x1FF, 9);
     let pc_value = registers.pc as u32 + pc_offset as u32;
-    memory.write(pc_value as u16, registers.get_reg_value(r0));
+    memory.write(pc_value as u16, registers.get_reg_value(r0) as u16);
 }
 
 pub fn load_e(instr: u16, registers: &mut Registers) {
@@ -341,7 +347,7 @@ pub fn and(instr: u16, registers: &mut Registers) {
         let r2_address: u16 = instr & 0x7;
         r1_value & registers.get_reg_value(r2_address)
     };
-    registers.update_register(r0, value);
+    registers.update_register(r0, value as u16);
     registers.update_flag(r0);
 }
 
@@ -350,7 +356,7 @@ pub fn ldi(instr: u16, registers: &mut Registers, memory: &mut Memory) {
     let pc_offset = sign_extend(instr & 0x1FF, 9);
     let value = registers.pc as u32 + pc_offset as u32;
     let tmp = memory.read(value as u16);
-    let value = memory.read(tmp);
+    let value = memory.read(tmp as u16);
     registers.update_register(r0, value);
     registers.update_flag(r0);
 }
@@ -398,6 +404,14 @@ fn read_image_file(file_path: &str, memory: &mut Memory) {
 }
 
 fn main() {
+    let stdin = 0;
+    let termios = termios::Termios::from_fd(stdin).unwrap();
+    let mut new_termios = termios.clone();
+    new_termios.c_iflag &= IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON;
+    new_termios.c_lflag &= !(ICANON | ECHO); // no echo and canonical mode
+    tcsetattr(stdin, TCSANOW, &mut new_termios).unwrap();
+
+
     const START: u16 = 0x3000;
     let mut memory = Memory::new();
     let mut registers = Registers::new();
@@ -433,4 +447,6 @@ fn main() {
             _ => break,
         }
     }
+    tcsetattr(stdin, TCSANOW, &termios).unwrap();
 }
+
