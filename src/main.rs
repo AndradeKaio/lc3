@@ -168,7 +168,7 @@ impl Registers {
     pub fn update_flag(&mut self, value: u16) {
         if self.get_reg_value(value) == 0 {
             self.cond = Flag::Zero as u16
-        } else if self.get_reg_value(value) >> 15 != 0 {
+        } else if (self.get_reg_value(value) >> 15) != 0 {
             self.cond = Flag::Neg as u16
         } else {
             self.cond = Flag::Pos as u16
@@ -186,8 +186,10 @@ pub fn trap(trap_instr: u16, registers: &mut Registers, memory: &mut Memory) {
         }
         //TrapCode::Out
         0x21 => {
-            let value = memory.read(registers.r0);
-            print!("{}", (value as u8) as char);
+            // Write out character
+            let c = registers.r0 as u8;
+            print!("{}", c as char);
+            // println!("[*] OUT");
         }
         //TrapCode::Puts
         0x22 => {
@@ -261,14 +263,14 @@ pub fn store_i(instr: u16, registers: &mut Registers, memory: &mut Memory) {
     let pc_offset: u16 = sign_extend(instr & 0x1FF, 9);
     let value = pc_offset as u32 + registers.pc as u32;
     let value = memory.read(value as u16);
-    memory.write(value as u16, registers.get_reg_value(r0) as u16);
+    memory.write(value as u16, registers.get_reg_value(r0));
 }
 
 pub fn store(instr: u16, registers: &mut Registers, memory: &mut Memory) {
     let r0: u16 = (instr >> 9) & 0x7;
     let pc_offset: u16 = sign_extend(instr & 0x1FF, 9);
     let pc_value = registers.pc as u32 + pc_offset as u32;
-    memory.write(pc_value as u16, registers.get_reg_value(r0) as u16);
+    memory.write(pc_value as u16, registers.get_reg_value(r0));
 }
 
 pub fn load_e(instr: u16, registers: &mut Registers) {
@@ -313,14 +315,14 @@ pub fn jsr(instr: u16, registers: &mut Registers) {
 }
 
 pub fn jmp(instr: u16, registers: &mut Registers) {
-    let r1: u16 = (instr >> 6) & 0x7;
+    let r1 = (instr >> 6) & 0x7;
     registers.pc = registers.get_reg_value(r1);
 }
 
 pub fn br(instr: u16, registers: &mut Registers) {
-    let pc_offset: u16 = sign_extend(instr & 0x1FF, 9);
-    let cond_flag: u16 = (instr >> 9) & 0x7;
-    if (cond_flag & registers.cond) != 0 {
+    let pc_offset = sign_extend(instr & 0x1FF, 9);
+    let cond_flag = (instr >> 9) & 0x7;
+    if cond_flag & registers.cond != 0 {
         registers.pc = (registers.pc as u32 + pc_offset as u32) as u16;
     }
 }
@@ -329,7 +331,7 @@ pub fn not(instr: u16, registers: &mut Registers) {
     let r0: u16 = (instr >> 9) & 0x7;
     let r1: u16 = (instr >> 6) & 0x7;
     let value = registers.get_reg_value(r1);
-    registers.update_register(r1, !value);
+    registers.update_register(r0, !value);
     registers.update_flag(r0);
 }
 
@@ -343,10 +345,10 @@ pub fn and(instr: u16, registers: &mut Registers) {
         let imm5 = sign_extend(instr & 0x1F, 5);
         r1_value & imm5
     } else {
-        let r2_address: u16 = instr & 0x7;
+        let r2_address = instr & 0x7;
         r1_value & registers.get_reg_value(r2_address)
     };
-    registers.update_register(r0, value as u16);
+    registers.update_register(r0, value);
     registers.update_flag(r0);
 }
 
@@ -354,22 +356,22 @@ pub fn ldi(instr: u16, registers: &mut Registers, memory: &mut Memory) {
     let r0: u16 = (instr >> 9) & 0x7;
     let pc_offset = sign_extend(instr & 0x1FF, 9);
     let value = registers.pc + pc_offset;
-    let tmp = memory.read(value as u16);
-    let value = memory.read(tmp as u16);
+    let tmp = memory.read(value);
+    let value = memory.read(tmp);
     registers.update_register(r0, value);
     registers.update_flag(r0);
 }
 
 pub fn add(instr: u16, registers: &mut Registers) {
-    let r0: u16 = (instr >> 9) & 0x7;
-    let r1: u16 = (instr >> 6) & 0x7;
-    let imm5_flag: u16 = (instr >> 5) & 0x1;
+    let r0 = (instr >> 9) & 0x7;
+    let r1 = (instr >> 6) & 0x7;
+    let imm5_flag = (instr >> 5) & 0x1;
     let r1_value = registers.get_reg_value(r1);
-    let value = if imm5_flag != 0 {
+    let value = if imm5_flag == 1 {
         let imm5 = sign_extend(instr & 0x1F, 5);
         r1_value as u32 + imm5 as u32
     } else {
-        let r2: u16 = instr & 0x7;
+        let r2 = instr & 0x7;
         r1_value as u32 + registers.get_reg_value(r2) as u32
     };
     registers.update_register(r0, value as u16);
@@ -446,12 +448,12 @@ fn main() {
             OpCode::Ldr => load_r(instr, &mut registers, &mut memory),
             OpCode::Str => store_r(instr, &mut registers, &mut memory),
             OpCode::Not => not(instr, &mut registers),
+            OpCode::And => and(instr, &mut registers),
             OpCode::Ldi => ldi(instr, &mut registers, &mut memory),
             OpCode::Sti => store_i(instr, &mut registers, &mut memory),
             OpCode::Jmp => jmp(instr, &mut registers),
             OpCode::Lea => load_e(instr, &mut registers),
             OpCode::Trap => trap(instr, &mut registers, &mut memory),
-            OpCode::And => and(instr, &mut registers),
             _ => break,
         }
     }
