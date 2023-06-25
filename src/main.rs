@@ -126,8 +126,8 @@ impl Registers {
             r5: 0,
             r6: 0,
             r7: 0,
-            cond: 0,
             pc: 0,
+            cond: 0,
         }
     }
 
@@ -274,7 +274,7 @@ pub fn store(instr: u16, registers: &mut Registers, memory: &mut Memory) {
 
 pub fn load_e(instr: u16, registers: &mut Registers) {
     let r0: u16 = (instr >> 9) & 0x7;
-    let pc_offset: u16 = sign_extend(instr & 0x1FF, 9);
+    let pc_offset = sign_extend(instr & 0x1FF, 9);
     let value = registers.pc as u32 + pc_offset as u32;
     registers.update_register(r0, value as u16);
     registers.update_flag(r0);
@@ -301,7 +301,7 @@ pub fn load(instr: u16, registers: &mut Registers, memory: &mut Memory) {
 
 pub fn jsr(instr: u16, registers: &mut Registers) {
     let long_flag: u16 = (instr >> 11) & 1;
-    registers.update_register(registers.r7, registers.pc);
+    registers.r7 = registers.pc;
 
     if long_flag != 0 {
         let long_flag_offset = sign_extend(instr & 0x7FF, 11);
